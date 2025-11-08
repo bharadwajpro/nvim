@@ -437,13 +437,18 @@ require("lazy").setup({
 				ensure_installed = {
 					"lua_ls", -- Lua
 					"ts_ls", -- TypeScript/JavaScript
-					"jdtls", -- Java
+					"jdtls", -- Java (installed by Mason but configured via nvim-jdtls plugin)
 					"jsonls", -- JSON
 				},
 				automatic_installation = true,
 				handlers = {
 					-- Default handler for all servers
 					function(server_name)
+						-- Skip jdtls - it's configured by nvim-jdtls plugin
+						if server_name == "jdtls" then
+							return
+						end
+
 						local lspconfig = require("lspconfig")
 						local cmp_nvim_lsp = require("cmp_nvim_lsp")
 
@@ -715,6 +720,163 @@ require("lazy").setup({
 					-- JS/TS/TSX/JSX/JSON use LSP formatters (ts_ls, jsonls)
 					-- Java uses LSP formatter (jdtls)
 				},
+			})
+		end,
+	},
+
+	-- nvim-jdtls: Enhanced Java LSP support for large projects
+	{
+		"mfussenegger/nvim-jdtls",
+		ft = "java", -- Only load for Java files
+		dependencies = {
+			"mfussenegger/nvim-dap", -- Debug Adapter Protocol (optional but recommended)
+		},
+		config = function()
+			-- This will be triggered when a Java file is opened
+			vim.api.nvim_create_autocmd("FileType", {
+				pattern = "java",
+				callback = function()
+					local jdtls = require("jdtls")
+
+					-- Find the jdtls installation directory from Mason
+					local mason_registry = require("mason-registry")
+					local jdtls_pkg = mason_registry.get_package("jdtls")
+					local jdtls_path = jdtls_pkg:get_install_path()
+
+					-- Determine OS-specific configuration
+					local os_config = "linux"
+					if vim.fn.has("mac") == 1 then
+						os_config = "mac"
+					elseif vim.fn.has("win32") == 1 then
+						os_config = "win"
+					end
+
+					-- Get project name for workspace separation
+					local project_name = vim.fn.fnamemodify(vim.fn.getcwd(), ":p:h:t")
+					local workspace_dir = vim.fn.stdpath("data") .. "/jdtls-workspace/" .. project_name
+
+					-- jdtls configuration
+					local config = {
+						cmd = {
+							"java",
+							"-Declipse.application=org.eclipse.jdt.ls.core.id1",
+							"-Dosgi.bundles.defaultStartLevel=4",
+							"-Declipse.product=org.eclipse.jdt.ls.core.product",
+							"-Dlog.protocol=true",
+							"-Dlog.level=ALL",
+							"-Xmx1g",
+							"--add-modules=ALL-SYSTEM",
+							"--add-opens",
+							"java.base/java.util=ALL-UNNAMED",
+							"--add-opens",
+							"java.base/java.lang=ALL-UNNAMED",
+							"-jar",
+							vim.fn.glob(jdtls_path .. "/plugins/org.eclipse.equinox.launcher_*.jar"),
+							"-configuration",
+							jdtls_path .. "/config_" .. os_config,
+							"-data",
+							workspace_dir,
+						},
+
+						root_dir = require("jdtls.setup").find_root({ ".git", "mvnw", "gradlew", "pom.xml", "build.gradle", "build.xml" }),
+
+						settings = {
+							java = {
+								eclipse = {
+									downloadSources = true,
+								},
+								configuration = {
+									updateBuildConfiguration = "interactive",
+								},
+								maven = {
+									downloadSources = true,
+								},
+								implementationsCodeLens = {
+									enabled = true,
+								},
+								referencesCodeLens = {
+									enabled = true,
+								},
+								references = {
+									includeDecompiledSources = true,
+								},
+								format = {
+									enabled = true,
+								},
+							},
+							signatureHelp = { enabled = true },
+							completion = {
+								favoriteStaticMembers = {
+									"org.hamcrest.MatcherAssert.assertThat",
+									"org.hamcrest.Matchers.*",
+									"org.hamcrest.CoreMatchers.*",
+									"org.junit.jupiter.api.Assertions.*",
+									"java.util.Objects.requireNonNull",
+									"java.util.Objects.requireNonNullElse",
+									"org.mockito.Mockito.*",
+								},
+							},
+							sources = {
+								organizeImports = {
+									starThreshold = 9999,
+									staticStarThreshold = 9999,
+								},
+							},
+							codeGeneration = {
+								toString = {
+									template = "${object.className}{${member.name()}=${member.value}, ${otherMembers}}",
+								},
+								useBlocks = true,
+							},
+						},
+
+						init_options = {
+							bundles = {},
+						},
+
+						on_attach = function(client, bufnr)
+							-- Enable jdtls-specific commands
+							jdtls.setup_dap({ hotcodereplace = "auto" })
+							require("jdtls.dap").setup_dap_main_class_configs()
+
+							-- Keybindings for Java-specific features
+							local opts = { buffer = bufnr, noremap = true, silent = true }
+
+							-- Standard LSP keybindings (same as other LSPs)
+							vim.keymap.set("n", "gd", vim.lsp.buf.definition, vim.tbl_extend("force", opts, { desc = "Go to definition" }))
+							vim.keymap.set("n", "gD", vim.lsp.buf.declaration, vim.tbl_extend("force", opts, { desc = "Go to declaration" }))
+							vim.keymap.set("n", "gi", vim.lsp.buf.implementation, vim.tbl_extend("force", opts, { desc = "Go to implementation" }))
+							vim.keymap.set("n", "gr", vim.lsp.buf.references, vim.tbl_extend("force", opts, { desc = "Show references" }))
+							vim.keymap.set("n", "K", vim.lsp.buf.hover, vim.tbl_extend("force", opts, { desc = "Hover documentation" }))
+							vim.keymap.set("n", "<C-k>", vim.lsp.buf.signature_help, vim.tbl_extend("force", opts, { desc = "Signature help" }))
+							vim.keymap.set("n", "<leader>rn", vim.lsp.buf.rename, vim.tbl_extend("force", opts, { desc = "Rename symbol" }))
+							vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, vim.tbl_extend("force", opts, { desc = "Code action" }))
+							vim.keymap.set("n", "[d", vim.diagnostic.goto_prev, vim.tbl_extend("force", opts, { desc = "Previous diagnostic" }))
+							vim.keymap.set("n", "]d", vim.diagnostic.goto_next, vim.tbl_extend("force", opts, { desc = "Next diagnostic" }))
+
+							-- Java-specific keybindings
+							vim.keymap.set("n", "<leader>co", jdtls.organize_imports, vim.tbl_extend("force", opts, { desc = "Organize imports" }))
+							vim.keymap.set("n", "<leader>cv", jdtls.extract_variable, vim.tbl_extend("force", opts, { desc = "Extract variable" }))
+							vim.keymap.set("v", "<leader>cv", function()
+								jdtls.extract_variable(true)
+							end, vim.tbl_extend("force", opts, { desc = "Extract variable" }))
+							vim.keymap.set("n", "<leader>cc", jdtls.extract_constant, vim.tbl_extend("force", opts, { desc = "Extract constant" }))
+							vim.keymap.set("v", "<leader>cc", function()
+								jdtls.extract_constant(true)
+							end, vim.tbl_extend("force", opts, { desc = "Extract constant" }))
+							vim.keymap.set("v", "<leader>cm", function()
+								jdtls.extract_method(true)
+							end, vim.tbl_extend("force", opts, { desc = "Extract method" }))
+							vim.keymap.set("n", "<leader>ct", jdtls.test_class, vim.tbl_extend("force", opts, { desc = "Test class" }))
+							vim.keymap.set("n", "<leader>tn", jdtls.test_nearest_method, vim.tbl_extend("force", opts, { desc = "Test nearest method" }))
+						end,
+
+						capabilities = require("cmp_nvim_lsp").default_capabilities(),
+					}
+
+					-- Start or attach to jdtls
+					jdtls.start_or_attach(config)
+				end,
 			})
 		end,
 	},
