@@ -400,6 +400,19 @@ require("lazy").setup({
 		end,
 	},
 
+	-- Fidget: LSP progress notifications
+	{
+		"j-hui/fidget.nvim",
+		opts = {
+			notification = {
+				window = {
+					winblend = 0, -- Transparency (0 = opaque, 100 = transparent)
+					relative = "editor",
+				},
+			},
+		},
+	},
+
 	-- Mason: Package manager for LSP servers, formatters, and linters
 	{
 		"williamboman/mason.nvim",
